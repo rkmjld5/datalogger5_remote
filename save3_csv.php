@@ -1,4 +1,3 @@
-```php
 <?php
 /*
  * ESP32 Data Logger Remote
@@ -368,4 +367,4 @@ saveRespond(200, [
     'timezone' => $timezone,
     'database_saved' => true
 ]);
-```
+

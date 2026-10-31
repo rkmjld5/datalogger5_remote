@@ -27,11 +27,16 @@
 // ---------------- WI-FI / STORAGE ----------------
 const char *NETWORK_FILE = "/networks.txt";  // LittleFS, Wi-Fi credentials only
 const char *SD_CSV_FILE = "/sensor_data.csv"; // SD card, readings
-const char *SYNC_URL = "https://datalogger3-remote.onrender.com/sync_sdcard.php";
-const char *SERVER_URL = "https://datalogger3-remote.onrender.com/save3_csv.php";
+const char *SYNC_URL = "https://datalogger5-remote.onrender.com/sync_sdcard.php";
+const char *SERVER_URL = "https://datalogger5-remote.onrender.com/save3_csv.php";
 const char *GEO_URL = "http://ip-api.com/json/?fields=status,timezone";
 const char *CSV_HEADER = "id,value1,value2,value3,Date,Time,TimeStamp,timezone,device_id";
 const uint8_t SD_CS_PIN = D0; // GPIO16; SPI pins remain D5/D6/D7
+
+
+
+
+
 
 const char *deviceID = "ESP0001";
 const char *apiToken = "EspSwitch52026";

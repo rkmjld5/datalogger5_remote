@@ -1,20 +1,33 @@
 <?php
 /*
- * Data Logger remote configuration for Render + TiDB Cloud.
- *
- * Database settings are read from Render environment variables.
- * A local .env file is supported for local development.
+ * Data Logger Remote Configuration
+ * Platform: Render
+ * Database: TiDB Cloud
+ * Database name: espdemo2
  *
  * IMPORTANT:
- * Never commit real database passwords to GitHub.
+ * 1. No session is started in this file.
+ * 2. No output is generated during successful initialization.
+ * 3. Database credentials must be configured in Render Environment.
+ * 4. Do not add spaces, HTML, or a UTF-8 BOM before <?php.
+ * 5. Do not add a closing PHP tag at the end of this file.
  */
 
-date_default_timezone_set('Asia/Kolkata');
+/* ---------------------------------------------------------
+   1. Timezone
+   --------------------------------------------------------- */
+
+// Default timezone for PHP operations.
+// Sensor installation-local time is calculated separately
+// using the timezone supplied by the ESP32.
+
+date_default_timezone_set('UTC');
 
 /* ---------------------------------------------------------
-   1. Read a local .env file when available.
-   Render environment variables take precedence.
+   2. Optional local .env file
    --------------------------------------------------------- */
+
+// Render environment variables take precedence over .env.
 
 $envFile = __DIR__ . '/.env';
 
@@ -44,6 +57,7 @@ if (is_file($envFile) && is_readable($envFile)) {
             $envKey = trim($envKey);
             $envValue = trim($envValue);
 
+            // Remove matching surrounding quotation marks.
             if (strlen($envValue) >= 2) {
 
                 $first = $envValue[0];
@@ -57,11 +71,13 @@ if (is_file($envFile) && is_readable($envFile)) {
                 }
             }
 
-            // Do not override an existing process environment variable.
-            if ($envKey !== '' && getenv($envKey) === false) {
+            // Never overwrite an existing environment variable.
+            if (
+                $envKey !== '' &&
+                getenv($envKey) === false
+            ) {
 
                 putenv($envKey . '=' . $envValue);
-
                 $_ENV[$envKey] = $envValue;
             }
         }
@@ -69,43 +85,7 @@ if (is_file($envFile) && is_readable($envFile)) {
 }
 
 /* ---------------------------------------------------------
-   2. Secure PHP session configuration.
-   --------------------------------------------------------- */
-
-if (session_status() === PHP_SESSION_NONE) {
-
-    $httpsIsOn = (
-        (
-            !empty($_SERVER['HTTPS']) &&
-            strtolower((string)$_SERVER['HTTPS']) !== 'off'
-        ) ||
-        (
-            isset($_SERVER['HTTP_X_FORWARDED_PROTO']) &&
-            strtolower(
-                (string)$_SERVER['HTTP_X_FORWARDED_PROTO']
-            ) === 'https'
-        )
-    );
-
-    session_set_cookie_params([
-        'httponly' => true,
-        'secure' => $httpsIsOn,
-        'samesite' => 'Lax'
-    ]);
-
-    session_start();
-}
-
-/* ---------------------------------------------------------
-   3. Enable MySQLi error reporting.
-   --------------------------------------------------------- */
-
-mysqli_report(
-    MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT
-);
-
-/* ---------------------------------------------------------
-   4. Environment variable helper.
+   3. Environment variable helper
    --------------------------------------------------------- */
 
 if (!function_exists('dataLoggerEnv')) {
@@ -117,26 +97,37 @@ if (!function_exists('dataLoggerEnv')) {
 
         $value = getenv($key);
 
-        return $value === false
-            ? $default
-            : trim((string)$value);
+        if ($value === false) {
+            return $default;
+        }
+
+        return trim((string)$value);
     }
 }
 
 /* ---------------------------------------------------------
-   5. Database configuration.
+   4. MySQLi error reporting
    --------------------------------------------------------- */
 
-$servername = dataLoggerEnv('DB_HOST', 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com');
+mysqli_report(
+    MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT
+);
 
-$dbUsername = dataLoggerEnv('DB_USER', '7NqqTQaUkuaCHCk.root');
+/* ---------------------------------------------------------
+   5. TiDB Cloud database configuration
+   --------------------------------------------------------- */
 
-$dbPassword = dataLoggerEnv('DB_PASSWORD', 'ZAed51VQLOuLATOa');
+// Set these values in Render > Your Service > Environment.
+
+$servername = dataLoggerEnv('DB_HOST');
+
+$dbUsername = dataLoggerEnv('DB_USER');
+
+$dbPassword = dataLoggerEnv('DB_PASSWORD');
 
 $dbname = dataLoggerEnv('DB_NAME', 'espdemo2');
 
 $dbport = (int)dataLoggerEnv('DB_PORT', '4000');
-
 
 $dbSslCa = dataLoggerEnv(
     'DB_SSL_CA',
@@ -144,23 +135,36 @@ $dbSslCa = dataLoggerEnv(
 );
 
 /* ---------------------------------------------------------
-   6. Connect to MySQL or TiDB Cloud.
+   6. Validate configuration
+   --------------------------------------------------------- */
+
+if (
+    $servername === '' ||
+    $dbUsername === '' ||
+    $dbPassword === '' ||
+    $dbname === '' ||
+    $dbport < 1 ||
+    $dbport > 65535
+) {
+
+    error_log(
+        'Data Logger: Required database environment ' .
+        'variables are missing or invalid.'
+    );
+
+    http_response_code(500);
+
+    exit(
+        'Database configuration error. ' .
+        'Check Render Environment settings.'
+    );
+}
+
+/* ---------------------------------------------------------
+   7. Connect to the database
    --------------------------------------------------------- */
 
 try {
-
-    if (
-        $servername === '' ||
-        $dbUsername === '' ||
-        $dbname === '' ||
-        $dbport < 1 ||
-        $dbport > 65535
-    ) {
-
-        throw new RuntimeException(
-            'Required database settings are missing or invalid.'
-        );
-    }
 
     $conn = mysqli_init();
 
@@ -185,17 +189,9 @@ try {
     if ($isRemoteDatabase) {
 
         /*
-         * Remote TiDB Cloud connection.
-         * TLS encryption is enabled.
+         * TiDB Cloud connection.
+         * TLS is required.
          */
-
-        if (defined('MYSQLI_OPT_SSL_VERIFY_SERVER_CERT')) {
-
-            $conn->options(
-                MYSQLI_OPT_SSL_VERIFY_SERVER_CERT,
-                true
-            );
-        }
 
         $caFile = (
             $dbSslCa !== '' &&
@@ -247,14 +243,14 @@ try {
     http_response_code(500);
 
     exit(
-        'Database connection failed. Please check the ' .
-        'Render Environment settings and TiDB Cloud ' .
-        'connection permissions.'
+        'Database connection failed. ' .
+        'Check Render Environment settings, ' .
+        'TiDB Cloud credentials, and TLS configuration.'
     );
 }
 
 /* ---------------------------------------------------------
-   7. HTML output escaping helper.
+   8. HTML output escaping helper
    --------------------------------------------------------- */
 
 if (!function_exists('h')) {
@@ -269,4 +265,9 @@ if (!function_exists('h')) {
     }
 }
 
-?>
+/*
+ * IMPORTANT:
+ * Do not start a PHP session in this file.
+ * Do not echo, print, or output HTML here.
+ * Do not add a closing PHP tag.
+ */

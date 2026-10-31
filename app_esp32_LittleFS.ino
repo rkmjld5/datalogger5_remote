@@ -43,10 +43,10 @@ const char *NETWORK_FILE = "/networks.txt";
 const char *LOCAL_CSV_FILE = "/sensor_data.csv";
 
 const char *SYNC_URL =
-  "https://datalogger4-remote.onrender.com/sync_littlefs.php";
+  "https://datalogger5-remote.onrender.com/sync_littlefs.php";
 
 const char *serverURL =
-  "https://datalogger4-remote.onrender.com/save3_csv.php";
+  "https://datalogger5-remote.onrender.com/save3_csv.php";
 
 const char *geoURL =
   "http://ip-api.com/json/?fields=status,timezone";

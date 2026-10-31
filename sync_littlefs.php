@@ -3,13 +3,10 @@
 // the server-side sensor_data.csv and espdemo2.logs without duplicating records.
 // Install beside save_csv.php in C:\xampp\htdocs\datalogger7_local\
 
+require_once __DIR__ . '/config.php';
 header('Content-Type: application/json; charset=utf-8');
 
-const API_TOKEN = 'EspSwitch52026';
-const MYSQL_HOST = 'localhost';
-const MYSQL_USER = 'root';
-const MYSQL_PASSWORD = '';
-const MYSQL_DATABASE = 'espdemo2';
+
 
 $csvFile = __DIR__ . DIRECTORY_SEPARATOR . 'sensor_data.csv';
 $header = ['id','value1','value2','value3','Date','Time','TimeStamp','timezone','device_id'];

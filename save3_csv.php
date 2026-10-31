@@ -1,31 +1,37 @@
-
+```php
 <?php
 /*
- * ESP32 Data Logger 4 Remote
+ * ESP32 Data Logger Remote
  *
  * Endpoint: /save3_csv.php
  *
- * Live ESP32 sensor upload to TiDB Cloud.
+ * Database: espdemo2
+ * Table: logs
  *
  * POST fields:
  * device_id, api_token, value1, value2, value3,
  * timestamp (Unix UTC), timezone
  *
- * Database: espdemo2
- * Table: logs
+ * Date       = Installation-local date.
+ * Time       = Installation-local time.
+ * TimeStamp  = UTC timestamp.
  *
- * Date and Time = installation-local time.
- * TimeStamp = UTC.
+ * IMPORTANT:
+ * This endpoint does not require a PHP session.
+ * No output should appear before the JSON response.
  */
 
-// IMPORTANT:
-// Load config.php BEFORE sending HTTP headers.
-// config.php may configure and start a PHP session.
-
-require_once __DIR__ . '/config.php';
+// ---------------------------------------------------------
+// 1. Set HTTP headers before loading configuration.
+// ---------------------------------------------------------
 
 header('Content-Type: application/json; charset=UTF-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('X-Content-Type-Options: nosniff');
+
+// ---------------------------------------------------------
+// 2. JSON response function.
+// ---------------------------------------------------------
 
 function saveRespond(int $status, array $data): void
 {
@@ -39,37 +45,70 @@ function saveRespond(int $status, array $data): void
     exit;
 }
 
+// ---------------------------------------------------------
+// 3. Load configuration and connect to TiDB Cloud.
+// ---------------------------------------------------------
+
 try {
 
-    // 1. POST requests only.
+    require_once __DIR__ . '/config.php';
 
-    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+} catch (Throwable $e) {
 
-        header('Allow: POST');
+    error_log(
+        'save3_csv.php configuration error: ' .
+        $e->getMessage()
+    );
 
-        saveRespond(405, [
-            'status' => 'error',
-            'message' => 'POST request required.'
-        ]);
-    }
+    saveRespond(500, [
+        'status' => 'error',
+        'message' => 'Database configuration failed.'
+    ]);
+}
 
-    // 2. Read credentials.
+// ---------------------------------------------------------
+// 4. Accept POST requests only.
+// ---------------------------------------------------------
 
-    $deviceID = trim((string)($_POST['device_id'] ?? ''));
-    $apiToken = trim((string)($_POST['api_token'] ?? ''));
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 
-    if (
-        $deviceID === '' ||
-        $apiToken === '' ||
-        !preg_match('/^[A-Za-z0-9_-]{1,32}$/', $deviceID)
-    ) {
-        saveRespond(400, [
-            'status' => 'error',
-            'message' => 'Missing or invalid device credentials.'
-        ]);
-    }
+    header('Allow: POST');
 
-    // 3. Verify registered ESP device.
+    saveRespond(405, [
+        'status' => 'error',
+        'message' => 'POST request required.'
+    ]);
+}
+
+// ---------------------------------------------------------
+// 5. Read device credentials.
+// ---------------------------------------------------------
+
+$deviceID = trim(
+    (string)($_POST['device_id'] ?? '')
+);
+
+$apiToken = trim(
+    (string)($_POST['api_token'] ?? '')
+);
+
+if (
+    $deviceID === '' ||
+    $apiToken === '' ||
+    !preg_match('/^[A-Za-z0-9_-]{1,32}$/', $deviceID)
+) {
+
+    saveRespond(400, [
+        'status' => 'error',
+        'message' => 'Missing or invalid device credentials.'
+    ]);
+}
+
+// ---------------------------------------------------------
+// 6. Authenticate the registered ESP32.
+// ---------------------------------------------------------
+
+try {
 
     $stmt = $conn->prepare(
         'SELECT token_hash, enabled
@@ -78,140 +117,205 @@ try {
          LIMIT 1'
     );
 
-    if (!$stmt) {
-        throw new RuntimeException(
-            'Could not prepare device authentication query.'
-        );
-    }
-
     $stmt->bind_param('s', $deviceID);
 
-    if (!$stmt->execute()) {
-        throw new RuntimeException(
-            'Device authentication query failed.'
-        );
-    }
+    $stmt->execute();
 
     $result = $stmt->get_result();
+
     $device = $result->fetch_assoc();
 
     $stmt->close();
 
-    $storedHash = is_array($device)
-        ? (string)($device['token_hash'] ?? '')
-        : '';
+} catch (Throwable $e) {
 
-    $submittedHash = hash('sha256', $apiToken);
+    error_log(
+        'save3_csv.php device authentication error: ' .
+        $e->getMessage()
+    );
 
-    if (
-        !$device ||
-        (int)($device['enabled'] ?? 0) !== 1 ||
-        $storedHash === '' ||
-        !hash_equals($storedHash, $submittedHash)
-    ) {
-        saveRespond(403, [
-            'status' => 'error',
-            'message' => 'Device is not authorized.'
-        ]);
-    }
+    saveRespond(500, [
+        'status' => 'error',
+        'message' => 'Device authentication query failed.'
+    ]);
+}
 
-    // 4. Read sensor values.
+$storedHash = is_array($device)
+    ? (string)($device['token_hash'] ?? '')
+    : '';
 
-    $value1 = trim((string)($_POST['value1'] ?? ''));
-    $value2 = trim((string)($_POST['value2'] ?? ''));
-    $value3 = trim((string)($_POST['value3'] ?? ''));
+$submittedHash = hash('sha256', $apiToken);
 
-    $timestampRaw = trim((string)($_POST['timestamp'] ?? ''));
-    $timezone = trim((string)($_POST['timezone'] ?? ''));
+if (
+    !$device ||
+    (int)($device['enabled'] ?? 0) !== 1 ||
+    $storedHash === '' ||
+    !hash_equals($storedHash, $submittedHash)
+) {
 
-    // 5. Validate sensor values.
+    saveRespond(403, [
+        'status' => 'error',
+        'message' => 'Device is not authorized.'
+    ]);
+}
 
-    if (
-        $value1 === '' ||
-        $value2 === '' ||
-        $value3 === '' ||
-        strlen($value1) > 30 ||
-        strlen($value2) > 30 ||
-        strlen($value3) > 50
-    ) {
-        saveRespond(400, [
-            'status' => 'error',
-            'message' => 'Missing sensor values or field length exceeded.'
-        ]);
-    }
+// ---------------------------------------------------------
+// 7. Read sensor values.
+// ---------------------------------------------------------
 
-    // 6. Validate Unix timestamp.
+$value1 = trim(
+    (string)($_POST['value1'] ?? '')
+);
 
-    if (
-        $timestampRaw === '' ||
-        !ctype_digit($timestampRaw)
-    ) {
-        saveRespond(400, [
-            'status' => 'error',
-            'message' => 'Invalid Unix timestamp.'
-        ]);
-    }
+$value2 = trim(
+    (string)($_POST['value2'] ?? '')
+);
 
-    $unixTimestamp = (int)$timestampRaw;
+$value3 = trim(
+    (string)($_POST['value3'] ?? '')
+);
 
-    if ($unixTimestamp <= 0) {
-        saveRespond(400, [
-            'status' => 'error',
-            'message' => 'Timestamp must be positive.'
-        ]);
-    }
+$timestampRaw = trim(
+    (string)($_POST['timestamp'] ?? '')
+);
 
-    // 7. Validate timezone.
+$timezone = trim(
+    (string)($_POST['timezone'] ?? '')
+);
 
-    if (
-        $timezone === '' ||
-        strlen($timezone) > 64 ||
-        !in_array(
-            $timezone,
-            DateTimeZone::listIdentifiers(DateTimeZone::ALL_WITH_BC),
-            true
-        )
-    ) {
-        saveRespond(400, [
-            'status' => 'error',
-            'message' => 'Invalid installation timezone.'
-        ]);
-    }
+// ---------------------------------------------------------
+// 8. Validate sensor values.
+// ---------------------------------------------------------
+
+if (
+    $value1 === '' ||
+    $value2 === '' ||
+    $value3 === '' ||
+    strlen($value1) > 30 ||
+    strlen($value2) > 30 ||
+    strlen($value3) > 50
+) {
+
+    saveRespond(400, [
+        'status' => 'error',
+        'message' => 'Missing sensor values or field length exceeded.'
+    ]);
+}
+
+// ---------------------------------------------------------
+// 9. Validate Unix timestamp.
+// ---------------------------------------------------------
+
+if (
+    $timestampRaw === '' ||
+    !ctype_digit($timestampRaw)
+) {
+
+    saveRespond(400, [
+        'status' => 'error',
+        'message' => 'Invalid Unix timestamp.'
+    ]);
+}
+
+$unixTimestamp = filter_var(
+    $timestampRaw,
+    FILTER_VALIDATE_INT
+);
+
+if (
+    $unixTimestamp === false ||
+    $unixTimestamp <= 0
+) {
+
+    saveRespond(400, [
+        'status' => 'error',
+        'message' => 'Timestamp must be a positive Unix timestamp.'
+    ]);
+}
+
+// ---------------------------------------------------------
+// 10. Validate installation timezone.
+// ---------------------------------------------------------
+
+if (
+    $timezone === '' ||
+    strlen($timezone) > 64 ||
+    !in_array(
+        $timezone,
+        DateTimeZone::listIdentifiers(
+            DateTimeZone::ALL_WITH_BC
+        ),
+        true
+    )
+) {
+
+    saveRespond(400, [
+        'status' => 'error',
+        'message' => 'Invalid installation timezone.'
+    ]);
+}
+
+// ---------------------------------------------------------
+// 11. Calculate installation-local date and time.
+// ---------------------------------------------------------
+
+try {
 
     $tz = new DateTimeZone($timezone);
-
-    // 8. Convert Unix UTC timestamp to installation-local time.
 
     $localDateTime = (
         new DateTimeImmutable('@' . $unixTimestamp)
     )->setTimezone($tz);
 
     $date = $localDateTime->format('Y-m-d');
+
     $time = $localDateTime->format('H:i:s');
 
-    // 9. Keep TimeStamp in UTC.
-
+    // Always store TimeStamp in UTC.
     $timestampUTC = gmdate(
         'Y-m-d H:i:s',
         $unixTimestamp
     );
 
-    // 10. Insert record into TiDB Cloud.
-    // Uses the $conn connection from config.php.
-    // No localhost/root connection is used.
+} catch (Throwable $e) {
+
+    error_log(
+        'save3_csv.php timestamp conversion error: ' .
+        $e->getMessage()
+    );
+
+    saveRespond(400, [
+        'status' => 'error',
+        'message' => 'Could not convert the supplied timestamp.'
+    ]);
+}
+
+// ---------------------------------------------------------
+// 12. Insert the live sensor record into TiDB Cloud.
+// ---------------------------------------------------------
+
+try {
+
+    /*
+     * The id column is intentionally omitted.
+     * The logs.id column must generate its own ID,
+     * normally through AUTO_INCREMENT.
+     */
 
     $stmt = $conn->prepare(
         'INSERT INTO logs
-            (value1, value2, value3, `Date`, `Time`,
-             `TimeStamp`, timezone, device_id)
+            (
+                value1,
+                value2,
+                value3,
+                `Date`,
+                `Time`,
+                `TimeStamp`,
+                timezone,
+                device_id
+            )
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
-
-    if (!$stmt) {
-        throw new RuntimeException(
-            'Could not prepare logs insertion.'
-        );
-    }
 
     $stmt->bind_param(
         'ssssssss',
@@ -225,52 +329,43 @@ try {
         $deviceID
     );
 
-    if (!$stmt->execute()) {
-
-        $error = $stmt->error;
-        $stmt->close();
-
-        error_log(
-            'Live record insertion failed: ' . $error
-        );
-
-        saveRespond(500, [
-            'status' => 'error',
-            'message' => 'Database insertion failed.',
-            'device_id' => $deviceID
-        ]);
-    }
+    $stmt->execute();
 
     $databaseID = $stmt->insert_id;
 
     $stmt->close();
 
-    // 11. Return success.
-
-    saveRespond(200, [
-        'status' => 'success',
-        'message' => 'Live record inserted into espdemo2.logs.',
-        'database_id' => $databaseID,
-        'device_id' => $deviceID,
-        'value1' => $value1,
-        'value2' => $value2,
-        'value3' => $value3,
-        'Date' => $date,
-        'Time' => $time,
-        'TimeStamp' => $timestampUTC,
-        'timezone' => $timezone,
-        'database_saved' => true
-    ]);
-
 } catch (Throwable $e) {
 
     error_log(
-        'datalogger4_remote save3_csv.php: ' .
+        'save3_csv.php database insertion failed: ' .
         $e->getMessage()
     );
 
     saveRespond(500, [
         'status' => 'error',
-        'message' => 'Server or database error. Check Render logs.'
+        'message' => 'Database insertion failed. Check Render logs.',
+        'device_id' => $deviceID,
+        'database_saved' => false
     ]);
 }
+
+// ---------------------------------------------------------
+// 13. Return a successful JSON response.
+// ---------------------------------------------------------
+
+saveRespond(200, [
+    'status' => 'success',
+    'message' => 'Live record inserted into espdemo2.logs.',
+    'database_id' => $databaseID,
+    'device_id' => $deviceID,
+    'value1' => $value1,
+    'value2' => $value2,
+    'value3' => $value3,
+    'Date' => $date,
+    'Time' => $time,
+    'TimeStamp' => $timestampUTC,
+    'timezone' => $timezone,
+    'database_saved' => true
+]);
+```

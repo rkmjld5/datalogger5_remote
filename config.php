@@ -127,15 +127,16 @@ if (!function_exists('dataLoggerEnv')) {
    5. Database configuration.
    --------------------------------------------------------- */
 
-$servername = dataLoggerEnv('DB_HOST', 'localhost');
+$servername = dataLoggerEnv('DB_HOST', 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com');
 
-$dbUsername = dataLoggerEnv('DB_USER', 'root');
+$dbUsername = dataLoggerEnv('DB_USER', '7NqqTQaUkuaCHCk.root');
 
-$dbPassword = dataLoggerEnv('DB_PASSWORD', '');
+$dbPassword = dataLoggerEnv('DB_PASSWORD', 'ZAed51VQLOuLATOa');
 
 $dbname = dataLoggerEnv('DB_NAME', 'espdemo2');
 
-$dbport = (int)dataLoggerEnv('DB_PORT', '3306');
+$dbport = (int)dataLoggerEnv('DB_PORT', '4000');
+
 
 $dbSslCa = dataLoggerEnv(
     'DB_SSL_CA',
